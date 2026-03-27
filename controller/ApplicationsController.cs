@@ -39,13 +39,30 @@ namespace JobHubPro.Api.Controllers
             return Ok(item);
         }
 
-        [HttpPost]
-        public async Task<IActionResult> Create(Application model)
-        {
-            _context.Applications.Add(model);
-            await _context.SaveChangesAsync();
-            return Ok(model);
-        }
+       [HttpPost]
+[Authorize(Roles = "CANDIDATE")] // Bắt buộc là ứng viên
+public async Task<IActionResult> Create(Application model)
+{
+    // 1. Lấy UserId từ Token
+    var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier) 
+                   ?? User.FindFirst("sub");
+    if (userIdClaim == null) return Unauthorized();
+    int userId = int.Parse(userIdClaim.Value);
+
+    // 2. Lấy Candidate Profile của User này
+    var candidate = await _context.CandidateProfiles.FirstOrDefaultAsync(c => c.UserId == userId);
+    if (candidate == null) return BadRequest("Vui lòng cập nhật hồ sơ ứng viên trước khi ứng tuyển.");
+
+    // 3. Ép cứng CandidateId bằng ID chính chủ, không dùng dữ liệu client gửi lên
+    model.CandidateId = candidate.Id;
+    model.AppliedAt = DateTime.UtcNow;
+    model.UpdatedAt = DateTime.UtcNow;
+    model.Status = "PENDING"; // Luôn mặc định là PENDING khi mới nộp
+
+    _context.Applications.Add(model);
+    await _context.SaveChangesAsync();
+    return Ok(model);
+}
 
         [HttpPut("{id}")]
         public async Task<IActionResult> Update(int id, Application model)

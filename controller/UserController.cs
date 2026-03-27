@@ -1,4 +1,5 @@
 using JobHubPro.Api.Models;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using RecruitmentApi.Data;
@@ -6,7 +7,8 @@ using RecruitmentApi.Data;
 namespace JobHubPro.Api.Controllers
 {
     [ApiController]
-    [Route("api/[controller]")]
+    [Route("api/v1/users")]
+    [Authorize(Roles = "ADMIN")] // Toàn bộ Controller này chỉ dành cho Admin
     public class UsersController : ControllerBase
     {
         private readonly AppDbContext _context;
@@ -19,24 +21,11 @@ namespace JobHubPro.Api.Controllers
         [HttpGet]
         public async Task<IActionResult> GetAll()
         {
-            var data = await _context.Users.ToListAsync();
+            // Nên ẩn PasswordHash trước khi trả về
+            var data = await _context.Users
+                .Select(u => new { u.Id, u.Email, u.Role, u.Status, u.CreatedAt })
+                .ToListAsync();
             return Ok(data);
-        }
-
-        [HttpGet("{id}")]
-        public async Task<IActionResult> GetById(int id)
-        {
-            var item = await _context.Users.FindAsync(id);
-            if (item == null) return NotFound();
-            return Ok(item);
-        }
-
-        [HttpPost]
-        public async Task<IActionResult> Create(User model)
-        {
-            _context.Users.Add(model);
-            await _context.SaveChangesAsync();
-            return Ok(model);
         }
 
         [HttpPut("{id}")]
@@ -46,24 +35,18 @@ namespace JobHubPro.Api.Controllers
             if (item == null) return NotFound();
 
             item.Email = model.Email;
-            item.PasswordHash = model.PasswordHash;
             item.Role = model.Role;
             item.Status = model.Status;
-            item.UpdatedAt = DateTime.Now;
+            item.UpdatedAt = DateTime.UtcNow;
+
+            // Xử lý mã hóa nếu Admin có truyền lên mật khẩu mới
+            if (!string.IsNullOrEmpty(model.PasswordHash))
+            {
+                item.PasswordHash = BCrypt.Net.BCrypt.HashPassword(model.PasswordHash);
+            }
 
             await _context.SaveChangesAsync();
-            return Ok(item);
-        }
-
-        [HttpDelete("{id}")]
-        public async Task<IActionResult> Delete(int id)
-        {
-            var item = await _context.Users.FindAsync(id);
-            if (item == null) return NotFound();
-
-            _context.Users.Remove(item);
-            await _context.SaveChangesAsync();
-            return Ok(new { message = "Deleted successfully" });
+            return Ok(new { message = "Cập nhật thành công!" });
         }
     }
 }
