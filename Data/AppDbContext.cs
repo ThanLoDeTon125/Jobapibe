@@ -39,6 +39,12 @@ public partial class AppDbContext : DbContext
 
     public virtual DbSet<User> Users { get; set; }
 
+    public virtual DbSet<Article> Articles { get; set; }
+    
+    public virtual DbSet<JobReview> JobReviews { get; set; }
+    
+    public virtual DbSet<ArticleComment> ArticleComments { get; set; }
+
 
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -388,6 +394,63 @@ public partial class AppDbContext : DbContext
                 .HasColumnType("datetime")
                 .HasColumnName("updated_at");
         });
+
+        // 1. Cấu hình bảng Articles
+            modelBuilder.Entity<Article>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.Title).IsRequired().HasMaxLength(255);
+                entity.Property(e => e.Content).IsRequired();
+                entity.Property(e => e.CreatedAt).HasDefaultValueSql("(getdate())");
+
+                entity.HasOne(d => d.Author)
+                    .WithMany() 
+                    .HasForeignKey(d => d.AuthorId)
+                    .OnDelete(DeleteBehavior.Cascade)
+                    .HasConstraintName("FK_Articles_Users");
+            });
+
+            // 2. Cấu hình bảng JobReviews
+            modelBuilder.Entity<JobReview>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.Rating).IsRequired();
+                entity.Property(e => e.CreatedAt).HasDefaultValueSql("(getdate())");
+
+                entity.HasOne(d => d.Job)
+                    .WithMany() 
+                    .HasForeignKey(d => d.JobId)
+                    .OnDelete(DeleteBehavior.Cascade)
+                    .HasConstraintName("FK_JobReviews_Jobs");
+
+                entity.HasOne(d => d.Candidate)
+                    .WithMany() 
+                    .HasForeignKey(d => d.CandidateId)
+                    // Dùng NoAction để tránh lỗi "Multiple cascade paths" trong SQL Server
+                    .OnDelete(DeleteBehavior.NoAction) 
+                    .HasConstraintName("FK_JobReviews_CandidateProfiles");
+            });
+
+            // 3. Cấu hình bảng ArticleComments
+            modelBuilder.Entity<ArticleComment>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.Content).IsRequired();
+                entity.Property(e => e.CreatedAt).HasDefaultValueSql("(getdate())");
+
+                entity.HasOne(d => d.Article)
+                    .WithMany(p => p.ArticleComments)
+                    .HasForeignKey(d => d.ArticleId)
+                    .OnDelete(DeleteBehavior.Cascade)
+                    .HasConstraintName("FK_ArticleComments_Articles");
+
+                entity.HasOne(d => d.User)
+                    .WithMany()
+                    .HasForeignKey(d => d.UserId)
+                    // Dùng NoAction để tránh lỗi "Multiple cascade paths" trong SQL Server
+                    .OnDelete(DeleteBehavior.NoAction) 
+                    .HasConstraintName("FK_ArticleComments_Users");
+            });
 
         OnModelCreatingPartial(modelBuilder);
     }

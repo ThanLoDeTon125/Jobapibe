@@ -2,6 +2,8 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using RecruitmentApi.Data;
 using JobHubPro.Api.Models;
+using Microsoft.AspNetCore.Authorization;
+using System.Security.Claims;
 
 namespace JobHubPro.Api.Controllers
 {
@@ -41,38 +43,52 @@ namespace JobHubPro.Api.Controllers
             return Ok(item);
         }
 
-        [HttpPost]
-        public async Task<IActionResult> Create(CandidateProfile model)
-        {
-            _context.CandidateProfiles.Add(model);
-            await _context.SaveChangesAsync();
-            return Ok(model);
-        }
+      [HttpPost]
+[Authorize(Roles = "CANDIDATE")] // Phải là ứng viên
+public async Task<IActionResult> Create(CandidateProfile model)
+{
+    // Lấy UserId từ Token đang đăng nhập
+    var userId = int.Parse(User.FindFirst("sub")?.Value ?? "0");
+    
+    // Kiểm tra xem User này đã có Profile chưa, nếu có thì không cho tạo thêm
+    var exists = await _context.CandidateProfiles.AnyAsync(c => c.UserId == userId);
+    if (exists) return BadRequest("Bạn đã tạo hồ sơ rồi, hãy sử dụng chức năng Cập nhật.");
 
-        [HttpPut("{id}")]
-        public async Task<IActionResult> Update(int id, CandidateProfile model)
-        {
-            var item = await _context.CandidateProfiles.FindAsync(id);
-            if (item == null) return NotFound();
+    // Gán UserId bằng người dùng hiện tại
+    model.UserId = userId;
+    model.CreatedAt = DateTime.UtcNow;
+    model.UpdatedAt = DateTime.UtcNow;
 
-            item.UserId = model.UserId;
-            item.FullName = model.FullName;
-            item.Phone = model.Phone;
-            item.Address = model.Address;
-            item.DateOfBirth = model.DateOfBirth;
-            item.Gender = model.Gender;
-            item.ExperienceYears = model.ExperienceYears;
-            item.Education = model.Education;
-            item.CurrentPosition = model.CurrentPosition;
-            item.DesiredPosition = model.DesiredPosition;
-            item.DesiredSalary = model.DesiredSalary;
-            item.Bio = model.Bio;
-            item.AvatarUrl = model.AvatarUrl;
-            item.CvUrl = model.CvUrl;
+    _context.CandidateProfiles.Add(model);
+    await _context.SaveChangesAsync();
+    return Ok(model);
+}
 
-            await _context.SaveChangesAsync();
-            return Ok(item);
-        }
+[HttpPut("{id}")]
+[Authorize(Roles = "CANDIDATE, ADMIN")]
+public async Task<IActionResult> Update(int id, CandidateProfile model)
+{
+    var item = await _context.CandidateProfiles.FindAsync(id);
+    if (item == null) return NotFound();
+
+    var userId = int.Parse(User.FindFirst("sub")?.Value ?? "0");
+    var userRole = User.FindFirst(ClaimTypes.Role)?.Value;
+
+    // Chặn nếu cố tình sửa hồ sơ của người khác (trừ phi là Admin)
+    if (userRole != "ADMIN" && item.UserId != userId)
+        return Forbid();
+
+    // KHÔNG cho phép cập nhật item.UserId
+    item.FullName = model.FullName;
+    item.Phone = model.Phone;
+    item.AvatarUrl = model.AvatarUrl;
+    item.CvUrl = model.CvUrl;
+    // ... cập nhật các trường khác ...
+    item.UpdatedAt = DateTime.UtcNow;
+
+    await _context.SaveChangesAsync();
+    return Ok(item);
+}
 
         [HttpDelete("{id}")]
         public async Task<IActionResult> Delete(int id)

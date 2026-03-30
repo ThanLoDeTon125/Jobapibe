@@ -96,6 +96,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+app.UseStaticFiles(); // THÊM DÒNG NÀY ĐỂ MỞ CỔNG XEM FILE
 app.UseCors("AllowAll");
 app.UseAuthentication();
 app.UseAuthorization();
