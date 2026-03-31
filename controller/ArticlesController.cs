@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using RecruitmentApi.Data; // Đổi lại namespace nếu AppDbContext của bạn ở chỗ khác
+using RecruitmentApi.Data;
 using JobHubPro.Api.Models;
 using System.Security.Claims;
 
@@ -18,7 +18,7 @@ namespace JobHubPro.Api.Controllers
             _context = context;
         }
 
-        // Ai cũng xem được danh sách tin tức
+        // Lấy danh sách tin tức (Fix lỗi vòng lặp JSON bằng .Select)
         [HttpGet]
         [AllowAnonymous]
         public async Task<IActionResult> GetAll([FromQuery] string? keyword)
@@ -28,11 +28,23 @@ namespace JobHubPro.Api.Controllers
             if (!string.IsNullOrEmpty(keyword))
                 query = query.Where(a => a.Title.Contains(keyword));
 
-            var data = await query.OrderByDescending(a => a.CreatedAt).ToListAsync();
+            var data = await query.OrderByDescending(a => a.CreatedAt)
+                .Select(a => new {
+                    a.Id,
+                    a.Title,
+                    a.Content,
+                    a.ThumbnailUrl,
+                    a.CreatedAt,
+                    AuthorId = a.AuthorId,
+                    // Chỉ lấy đúng Email của tác giả, cắt đứt vòng lặp
+                    Author = new { Email = a.Author.Email } 
+                })
+                .ToListAsync();
+
             return Ok(data);
         }
 
-        // Xem chi tiết 1 bài viết (Kèm theo danh sách bình luận)
+        // Xem chi tiết bài viết (Kèm comment)
         [HttpGet("{id}")]
         [AllowAnonymous]
         public async Task<IActionResult> GetById(int id)
@@ -40,30 +52,53 @@ namespace JobHubPro.Api.Controllers
             var article = await _context.Articles
                 .Include(a => a.Author)
                 .Include(a => a.ArticleComments)
-                    .ThenInclude(c => c.User) // Lấy thông tin người bình luận
+                    .ThenInclude(c => c.User)
                 .FirstOrDefaultAsync(a => a.Id == id);
 
             if (article == null) return NotFound();
-            return Ok(article);
+
+            return Ok(new {
+                article.Id,
+                article.Title,
+                article.Content,
+                article.ThumbnailUrl,
+                article.CreatedAt,
+                AuthorId = article.AuthorId,
+                Author = new { Email = article.Author.Email },
+                ArticleComments = article.ArticleComments.Select(c => new {
+                    c.Id,
+                    c.Content,
+                    c.CreatedAt,
+                    User = new { Email = c.User.Email }
+                })
+            });
         }
 
-        // Chỉ Admin hoặc Nhà tuyển dụng mới được đăng tin
+        // Viết bài mới (Fix lỗi không lấy được ID tác giả)
         [HttpPost]
         [Authorize(Roles = "ADMIN, EMPLOYER")]
         public async Task<IActionResult> Create([FromBody] Article model)
         {
-            var userId = int.Parse(User.FindFirst("sub")?.Value ?? "0");
-            
-            model.AuthorId = userId; // Tự động gán người viết là user đang đăng nhập
+            // Bắt trọn mọi loại định dạng ID từ JWT Token
+            var claimId = User.FindFirst("id")?.Value 
+                       ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value 
+                       ?? User.FindFirst("sub")?.Value;
+
+            if (string.IsNullOrEmpty(claimId) || !int.TryParse(claimId, out int userId))
+                return Unauthorized(new { message = "Không thể xác định danh tính tác giả." });
+
+            model.AuthorId = userId;
             model.CreatedAt = DateTime.UtcNow;
             model.UpdatedAt = DateTime.UtcNow;
 
             _context.Articles.Add(model);
             await _context.SaveChangesAsync();
-            return Ok(model);
+            
+            // Trả về Object thông báo thay vì toàn bộ Model để tránh lỗi Serialization
+            return Ok(new { message = "Tạo bài viết thành công!", id = model.Id });
         }
 
-        // Sửa tin tức (Chỉ người viết hoặc Admin mới được sửa)
+        // Sửa bài viết
         [HttpPut("{id}")]
         [Authorize(Roles = "ADMIN, EMPLOYER")]
         public async Task<IActionResult> Update(int id, [FromBody] Article model)
@@ -71,7 +106,8 @@ namespace JobHubPro.Api.Controllers
             var item = await _context.Articles.FindAsync(id);
             if (item == null) return NotFound();
 
-            var userId = int.Parse(User.FindFirst("sub")?.Value ?? "0");
+            var claimId = User.FindFirst("id")?.Value ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value;
+            int userId = !string.IsNullOrEmpty(claimId) ? int.Parse(claimId) : 0;
             var userRole = User.FindFirst(ClaimTypes.Role)?.Value;
 
             if (userRole != "ADMIN" && item.AuthorId != userId)
@@ -83,10 +119,10 @@ namespace JobHubPro.Api.Controllers
             item.UpdatedAt = DateTime.UtcNow;
 
             await _context.SaveChangesAsync();
-            return Ok(item);
+            return Ok(new { message = "Cập nhật thành công!" });
         }
 
-        // Xóa tin tức
+        // Xóa bài viết
         [HttpDelete("{id}")]
         [Authorize(Roles = "ADMIN, EMPLOYER")]
         public async Task<IActionResult> Delete(int id)
@@ -94,7 +130,8 @@ namespace JobHubPro.Api.Controllers
             var item = await _context.Articles.FindAsync(id);
             if (item == null) return NotFound();
 
-            var userId = int.Parse(User.FindFirst("sub")?.Value ?? "0");
+            var claimId = User.FindFirst("id")?.Value ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("sub")?.Value;
+            int userId = !string.IsNullOrEmpty(claimId) ? int.Parse(claimId) : 0;
             var userRole = User.FindFirst(ClaimTypes.Role)?.Value;
 
             if (userRole != "ADMIN" && item.AuthorId != userId)
@@ -102,7 +139,7 @@ namespace JobHubPro.Api.Controllers
 
             _context.Articles.Remove(item);
             await _context.SaveChangesAsync();
-            return Ok(new { message = "Xóa bài viết thành công." });
+            return Ok(new { message = "Đã xóa bài viết." });
         }
     }
 }

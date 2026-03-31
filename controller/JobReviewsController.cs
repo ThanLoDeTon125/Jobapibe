@@ -31,6 +31,19 @@ namespace JobHubPro.Api.Controllers
 
             return Ok(reviews);
         }
+        // DÀNH CHO ADMIN: Lấy tất cả đánh giá trong hệ thống
+        [HttpGet]
+        [Authorize(Roles = "ADMIN")]
+        public async Task<IActionResult> GetAllReviews()
+        {
+            var reviews = await _context.JobReviews
+                .Include(r => r.Candidate)
+                .Include(r => r.Job) // Lấy kèm tên công việc
+                .OrderByDescending(r => r.CreatedAt)
+                .ToListAsync();
+
+            return Ok(reviews);
+        }
 
         // Ứng viên viết đánh giá
         [HttpPost]

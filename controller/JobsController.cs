@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using RecruitmentApi.Data;
 using JobHubPro.Api.Models;
 using System.Security.Claims;
+using JobHubPro.Api.DTOs.Jobs;
 
 namespace JobHubPro.Api.Controllers
 {
@@ -18,27 +19,37 @@ namespace JobHubPro.Api.Controllers
             _context = context;
         }
 
-        [HttpGet]
-        [AllowAnonymous] 
-        public async Task<IActionResult> GetAll([FromQuery] string? keyword, [FromQuery] string? location, [FromQuery] decimal? minSalary)
-        {
-            var query = _context.Jobs.Include(x => x.Company).AsQueryable();
+[HttpGet]
+[AllowAnonymous] 
+public async Task<IActionResult> GetAll(
+    [FromQuery] string? keyword, 
+    [FromQuery] string? location, 
+    [FromQuery] decimal? minSalary,
+    [FromQuery] int? categoryId,
+    [FromQuery] string? employmentType)
+{
+    var query = _context.Jobs.Include(x => x.Company).AsQueryable();
 
-            // Khắc phục cảnh báo Null (CS8602) bằng cách check x.Title != null
-            if (!string.IsNullOrEmpty(keyword))
-                query = query.Where(x => x.Title != null && x.Title.Contains(keyword));
-            
-            if (!string.IsNullOrEmpty(location))
-                query = query.Where(x => x.Location != null && x.Location.Contains(location));
-            
-            if (minSalary.HasValue)
-                query = query.Where(x => x.SalaryMin != null && x.SalaryMin >= minSalary.Value);
+    if (!string.IsNullOrEmpty(keyword))
+        query = query.Where(x => x.Title != null && x.Title.Contains(keyword));
+    
+    if (!string.IsNullOrEmpty(location))
+        query = query.Where(x => x.Location != null && x.Location.Contains(location));
+    
+    if (minSalary.HasValue)
+        query = query.Where(x => x.SalaryMin != null && x.SalaryMin >= minSalary.Value);
 
-            var data = await query.OrderByDescending(x => x.CreatedAt).ToListAsync();
-            return Ok(data);
-        }
+    if (categoryId.HasValue)
+        query = query.Where(x => x.JobCategories.Any(jc => jc.CategoryId == categoryId.Value));
 
-        [HttpGet("{id}")]
+    if (!string.IsNullOrEmpty(employmentType))
+        query = query.Where(x => x.EmploymentType == employmentType);
+
+    var data = await query.OrderByDescending(x => x.CreatedAt).ToListAsync();
+    return Ok(data);
+}
+
+       [HttpGet("{id:int}")]
         [AllowAnonymous]
         public async Task<IActionResult> GetById(int id)
         {
@@ -49,7 +60,7 @@ namespace JobHubPro.Api.Controllers
 
         [HttpPost]
         [Authorize(Roles = "EMPLOYER, ADMIN")] 
-        public async Task<IActionResult> Create(Job model)
+        public async Task<IActionResult> Create([FromBody] createJobDto model)
         {
             var userId = int.Parse(User.FindFirst("sub")?.Value ?? "0");
             var company = await _context.Companies.FirstOrDefaultAsync(c => c.UserId == userId);
@@ -68,7 +79,9 @@ namespace JobHubPro.Api.Controllers
 
         [HttpPut("{id}")]
         [Authorize(Roles = "EMPLOYER, ADMIN")]
-        public async Task<IActionResult> Update(int id, Job model)
+        [HttpPut("{id}")]
+[Authorize(Roles = "EMPLOYER, ADMIN")]
+public async Task<IActionResult> Update(int id, [FromBody] updateJobDto model)
         {
             var item = await _context.Jobs.FindAsync(id);
             if (item == null) return NotFound();
