@@ -1,0 +1,22 @@
+
+c:\Users\su213\Downloads\gadm41_VNM_2.json\JobHubPro.Api>git config user.email "su213@example.com" 
+
+c:\Users\su213\Downloads\gadm41_VNM_2.json\JobHubPro.Api>git config user.name "su213" 
+
+c:\Users\su213\Downloads\gadm41_VNM_2.json\JobHubPro.Api>git add . 
+warning: in the working copy of 'controller/JobsController.cs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'git_push_api.bat', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'remote.log', LF will be replaced by CRLF the next time Git touches it
+
+c:\Users\su213\Downloads\gadm41_VNM_2.json\JobHubPro.Api>git commit -m "Update Backend API: DTOs, Controllers, and Jobs endpoints" 
+[main 4b456a7] Update Backend API: DTOs, Controllers, and Jobs endpoints
+ 10 files changed, 276 insertions(+), 155 deletions(-)
+ delete mode 100644 controller/CommpaniesController.cs
+ create mode 100644 controller/CompaniesController.cs
+ create mode 100644 git_push_api.bat
+ create mode 100644 push_api.log
+ create mode 100644 remote.log
+
+c:\Users\su213\Downloads\gadm41_VNM_2.json\JobHubPro.Api>git push origin main 
+To https://github.com/ThanLoDeTon125/Jobapibe
+   24714d1..4b456a7  main -> main

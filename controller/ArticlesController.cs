@@ -18,7 +18,6 @@ namespace JobHubPro.Api.Controllers
             _context = context;
         }
 
-        // Lấy danh sách tin tức (Fix lỗi vòng lặp JSON bằng .Select)
         [HttpGet]
         [AllowAnonymous]
         public async Task<IActionResult> GetAll([FromQuery] string? keyword)
@@ -36,15 +35,14 @@ namespace JobHubPro.Api.Controllers
                     a.ThumbnailUrl,
                     a.CreatedAt,
                     AuthorId = a.AuthorId,
-                    // Chỉ lấy đúng Email của tác giả, cắt đứt vòng lặp
-                    Author = new { Email = a.Author.Email } 
+                    // Check null tại đây
+                    Author = a.Author != null ? new { Email = a.Author.Email } : null 
                 })
                 .ToListAsync();
 
             return Ok(data);
         }
 
-        // Xem chi tiết bài viết (Kèm comment)
         [HttpGet("{id}")]
         [AllowAnonymous]
         public async Task<IActionResult> GetById(int id)
@@ -64,22 +62,22 @@ namespace JobHubPro.Api.Controllers
                 article.ThumbnailUrl,
                 article.CreatedAt,
                 AuthorId = article.AuthorId,
-                Author = new { Email = article.Author.Email },
+                // Check null tại đây
+                Author = article.Author != null ? new { Email = article.Author.Email } : null,
                 ArticleComments = article.ArticleComments.Select(c => new {
                     c.Id,
                     c.Content,
                     c.CreatedAt,
-                    User = new { Email = c.User.Email }
+                    // Check null tại đây
+                    User = c.User != null ? new { Email = c.User.Email } : null
                 })
             });
         }
 
-        // Viết bài mới (Fix lỗi không lấy được ID tác giả)
         [HttpPost]
         [Authorize(Roles = "ADMIN, EMPLOYER")]
         public async Task<IActionResult> Create([FromBody] Article model)
         {
-            // Bắt trọn mọi loại định dạng ID từ JWT Token
             var claimId = User.FindFirst("id")?.Value 
                        ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value 
                        ?? User.FindFirst("sub")?.Value;
@@ -94,11 +92,9 @@ namespace JobHubPro.Api.Controllers
             _context.Articles.Add(model);
             await _context.SaveChangesAsync();
             
-            // Trả về Object thông báo thay vì toàn bộ Model để tránh lỗi Serialization
             return Ok(new { message = "Tạo bài viết thành công!", id = model.Id });
         }
 
-        // Sửa bài viết
         [HttpPut("{id}")]
         [Authorize(Roles = "ADMIN, EMPLOYER")]
         public async Task<IActionResult> Update(int id, [FromBody] Article model)
@@ -122,7 +118,6 @@ namespace JobHubPro.Api.Controllers
             return Ok(new { message = "Cập nhật thành công!" });
         }
 
-        // Xóa bài viết
         [HttpDelete("{id}")]
         [Authorize(Roles = "ADMIN, EMPLOYER")]
         public async Task<IActionResult> Delete(int id)
