@@ -4,11 +4,12 @@ using RecruitmentApi.Data;
 using JobHubPro.Api.Models;
 using Microsoft.AspNetCore.Authorization;
 using System.Security.Claims;
+using JobHubPro.Api.DTOs.CandidateProfiles; // <-- Gọi file DTO riêng biệt vào đây
 
 namespace JobHubPro.Api.Controllers
 {
     [ApiController]
-    [Route("api/[controller]")]
+    [Route("api/v1/candidateprofiles")]
     public class CandidateProfilesController : ControllerBase
     {
         private readonly AppDbContext _context;
@@ -30,7 +31,7 @@ namespace JobHubPro.Api.Controllers
             return Ok(data);
         }
 
-        [HttpGet("{id}")]
+        [HttpGet("{id:int}")]
         public async Task<IActionResult> GetById(int id)
         {
             var item = await _context.CandidateProfiles
@@ -43,54 +44,61 @@ namespace JobHubPro.Api.Controllers
             return Ok(item);
         }
 
-      [HttpPost]
-[Authorize(Roles = "CANDIDATE")] // Phải là ứng viên
-public async Task<IActionResult> Create(CandidateProfile model)
-{
-    // Lấy UserId từ Token đang đăng nhập
-    var userId = int.Parse(User.FindFirst("sub")?.Value ?? "0");
-    
-    // Kiểm tra xem User này đã có Profile chưa, nếu có thì không cho tạo thêm
-    var exists = await _context.CandidateProfiles.AnyAsync(c => c.UserId == userId);
-    if (exists) return BadRequest("Bạn đã tạo hồ sơ rồi, hãy sử dụng chức năng Cập nhật.");
+        [HttpPost]
+        [Authorize(Roles = "CANDIDATE")]
+        public async Task<IActionResult> Create([FromBody] CandidateProfileDto model)
+        {
+            var claimId = User.FindFirst("id")?.Value ?? User.FindFirst("sub")?.Value ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var userId = !string.IsNullOrEmpty(claimId) ? int.Parse(claimId) : 0;
+            
+            var exists = await _context.CandidateProfiles.AnyAsync(c => c.UserId == userId);
+            if (exists) return BadRequest(new { message = "Bạn đã tạo hồ sơ rồi, hãy sử dụng chức năng Cập nhật." });
 
-    // Gán UserId bằng người dùng hiện tại
-    model.UserId = userId;
-    model.CreatedAt = DateTime.UtcNow;
-    model.UpdatedAt = DateTime.UtcNow;
+            var profile = new CandidateProfile
+            {
+                UserId = userId,
+                FullName = model.FullName ?? "Chưa cập nhật tên",
+                Phone = model.Phone,
+                Address = model.Address,
+                ExperienceYears = model.ExperienceYears ?? 0, 
+                CvUrl = model.CvUrl,
+                Bio = model.Bio,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
 
-    _context.CandidateProfiles.Add(model);
-    await _context.SaveChangesAsync();
-    return Ok(model);
-}
+            _context.CandidateProfiles.Add(profile);
+            await _context.SaveChangesAsync();
+            return Ok(new { message = "Tạo hồ sơ thành công!", id = profile.Id });
+        }
 
-[HttpPut("{id}")]
-[Authorize(Roles = "CANDIDATE, ADMIN")]
-public async Task<IActionResult> Update(int id, CandidateProfile model)
-{
-    var item = await _context.CandidateProfiles.FindAsync(id);
-    if (item == null) return NotFound();
+        [HttpPut("{id:int}")]
+        [Authorize(Roles = "CANDIDATE, ADMIN")]
+        public async Task<IActionResult> Update(int id, [FromBody] CandidateProfileDto model)
+        {
+            var item = await _context.CandidateProfiles.FindAsync(id);
+            if (item == null) return NotFound();
 
-    var userId = int.Parse(User.FindFirst("sub")?.Value ?? "0");
-    var userRole = User.FindFirst(ClaimTypes.Role)?.Value;
+            var claimId = User.FindFirst("id")?.Value ?? User.FindFirst("sub")?.Value ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var userId = !string.IsNullOrEmpty(claimId) ? int.Parse(claimId) : 0;
+            var userRole = User.FindFirst(ClaimTypes.Role)?.Value;
 
-    // Chặn nếu cố tình sửa hồ sơ của người khác (trừ phi là Admin)
-    if (userRole != "ADMIN" && item.UserId != userId)
-        return Forbid();
+            if (userRole != "ADMIN" && item.UserId != userId)
+                return Forbid();
 
-    // KHÔNG cho phép cập nhật item.UserId
-    item.FullName = model.FullName;
-    item.Phone = model.Phone;
-    item.AvatarUrl = model.AvatarUrl;
-    item.CvUrl = model.CvUrl;
-    // ... cập nhật các trường khác ...
-    item.UpdatedAt = DateTime.UtcNow;
+            item.FullName = model.FullName ?? item.FullName;
+            item.Phone = model.Phone;
+            item.Address = model.Address;
+            item.ExperienceYears = model.ExperienceYears ?? item.ExperienceYears;
+            item.CvUrl = model.CvUrl;
+            item.Bio = model.Bio;
+            item.UpdatedAt = DateTime.UtcNow;
 
-    await _context.SaveChangesAsync();
-    return Ok(item);
-}
+            await _context.SaveChangesAsync();
+            return Ok(new { message = "Cập nhật hồ sơ thành công!" });
+        }
 
-        [HttpDelete("{id}")]
+        [HttpDelete("{id:int}")]
         public async Task<IActionResult> Delete(int id)
         {
             var item = await _context.CandidateProfiles.FindAsync(id);
@@ -98,7 +106,7 @@ public async Task<IActionResult> Update(int id, CandidateProfile model)
 
             _context.CandidateProfiles.Remove(item);
             await _context.SaveChangesAsync();
-            return Ok(new { message = "Deleted successfully" });
+            return Ok(new { message = "Xóa hồ sơ thành công" });
         }
     }
 }

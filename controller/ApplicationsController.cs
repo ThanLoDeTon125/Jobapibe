@@ -3,7 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using RecruitmentApi.Data;
 using JobHubPro.Api.Models;
-using JobHubPro.Api.DTOs.Applications;
+using JobHubPro.Api.DTOs.Applications; // <-- Đã gọi chung thư mục chứa 2 file DTO
 using System.Security.Claims;
 
 namespace JobHubPro.Api.Controllers
@@ -23,88 +23,132 @@ namespace JobHubPro.Api.Controllers
         // DÀNH CHO ỨNG VIÊN (CANDIDATE)
         // ==========================================
 
-        // Lấy danh sách các công việc MÌNH ĐÃ NỘP
         [HttpGet("my-applications")]
         [Authorize(Roles = "CANDIDATE")]
         public async Task<IActionResult> GetMyApplications()
         {
-            var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "0");
+            var claimId = User.FindFirst("id")?.Value ?? User.FindFirst("sub")?.Value ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var userId = !string.IsNullOrEmpty(claimId) ? int.Parse(claimId) : 0;
             
-            // Tìm Profile ứng viên
             var candidate = await _context.CandidateProfiles.FirstOrDefaultAsync(c => c.UserId == userId);
-            if (candidate == null) return BadRequest("Không tìm thấy hồ sơ ứng viên.");
+            
+            if (candidate == null) return Ok(new List<object>());
 
             var data = await _context.Applications
                 .Include(a => a.Job)
-                    .ThenInclude(j => j.Company) // Lấy luôn tên công ty để hiển thị
+                    .ThenInclude(j => j.Company) 
                 .Where(a => a.CandidateId == candidate.Id)
                 .OrderByDescending(a => a.AppliedAt)
+                .Select(a => new {
+                    a.Id,
+                    a.Status,
+                    a.AppliedAt,
+                    Job = new {
+                        a.Job.Id,
+                        a.Job.Title,
+                        a.Job.Location,
+                        Company = a.Job.Company != null ? new {
+                            a.Job.Company.CompanyName,
+                            a.Job.Company.LogoUrl
+                        } : null
+                    }
+                })
                 .ToListAsync();
 
             return Ok(data);
         }
 
-        // Ứng viên nộp đơn mới
         [HttpPost]
         [Authorize(Roles = "CANDIDATE")]
-        public async Task<IActionResult> Create(Application model)
+        public async Task<IActionResult> Create([FromBody] CreateApplicationDto dto)
         {
-            var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "0");
+            var claimId = User.FindFirst("id")?.Value ?? User.FindFirst("sub")?.Value ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var userId = !string.IsNullOrEmpty(claimId) ? int.Parse(claimId) : 0;
+            
             var candidate = await _context.CandidateProfiles.FirstOrDefaultAsync(c => c.UserId == userId);
             
             if (candidate == null) 
-                return BadRequest("Vui lòng cập nhật hồ sơ cá nhân trước khi ứng tuyển.");
+                return BadRequest(new { message = "Vui lòng cập nhật Hồ sơ cá nhân trước khi ứng tuyển!" });
 
-            // Kiểm tra xem ứng viên đã nộp vào job này chưa (Tránh nộp trùng 2 lần)
+            if (candidate.Id == 0)
+                return BadRequest(new { message = "Hồ sơ của bạn bị lỗi dữ liệu (ID = 0). Vui lòng thử lưu lại hồ sơ cá nhân!" });
+
             var exists = await _context.Applications
-                .AnyAsync(a => a.JobId == model.JobId && a.CandidateId == candidate.Id);
+                .AnyAsync(a => a.JobId == dto.JobId && a.CandidateId == candidate.Id);
             if (exists)
                 return Conflict(new { message = "Bạn đã ứng tuyển vào công việc này rồi." });
 
-            model.CandidateId = candidate.Id;
-            model.Status = "NEW"; // Trạng thái mặc định ban đầu của ATS
-            model.AppliedAt = DateTime.UtcNow;
-            model.UpdatedAt = DateTime.UtcNow;
+            var model = new Application
+            {
+                JobId = dto.JobId,
+                CandidateId = candidate.Id,
+                Status = "NEW", 
+                AppliedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
 
             _context.Applications.Add(model);
+
+            var fkProperty = _context.Model.FindEntityType(typeof(Application))
+                ?.GetForeignKeys()
+                .FirstOrDefault(fk => fk.PrincipalEntityType.ClrType == typeof(CandidateProfile))
+                ?.Properties.FirstOrDefault()?.Name;
+
+            if (!string.IsNullOrEmpty(fkProperty) && fkProperty != "CandidateId")
+            {
+                _context.Entry(model).Property(fkProperty).CurrentValue = candidate.Id;
+            }
+
             await _context.SaveChangesAsync();
-            return Ok(model);
+            return Ok(new { message = "Ứng tuyển thành công!" });
         }
 
         // ==========================================
         // DÀNH CHO NHÀ TUYỂN DỤNG (EMPLOYER) & ADMIN
         // ==========================================
 
-        // HR lấy danh sách ứng viên nộp vào MỘT CÔNG VIỆC CỤ THỂ của công ty họ
-        [HttpGet("job/{jobId}")]
+        [HttpGet("job/{jobId:int}")]
         [Authorize(Roles = "EMPLOYER, ADMIN")]
         public async Task<IActionResult> GetApplicationsByJob(int jobId)
         {
-            var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "0");
+            var claimId = User.FindFirst("id")?.Value ?? User.FindFirst("sub")?.Value ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var userId = !string.IsNullOrEmpty(claimId) ? int.Parse(claimId) : 0;
             var userRole = User.FindFirst(ClaimTypes.Role)?.Value;
 
-            // Kiểm tra Job này có tồn tại và có thuộc về Công ty của HR này không
             var job = await _context.Jobs.FindAsync(jobId);
-            if (job == null) return NotFound("Không tìm thấy công việc.");
+            if (job == null) return NotFound(new { message = "Không tìm thấy công việc." });
 
             if (userRole != "ADMIN")
             {
                 var company = await _context.Companies.FirstOrDefaultAsync(c => c.UserId == userId);
                 if (company == null || job.CompanyId != company.Id)
-                    return Forbid("Bạn không có quyền xem đơn ứng tuyển của công việc này.");
+                    return Forbid(); 
             }
 
             var applications = await _context.Applications
-                .Include(a => a.Candidate) // Lấy thông tin ứng viên
+                .Include(a => a.Candidate)
+                    .ThenInclude(c => c.User) 
                 .Where(a => a.JobId == jobId)
                 .OrderByDescending(a => a.AppliedAt)
+                .Select(a => new {
+                    a.Id,
+                    a.Status,
+                    a.AppliedAt,
+                    Candidate = a.Candidate != null ? new {
+                        a.Candidate.Id,
+                        a.Candidate.FullName,
+                        a.Candidate.Phone,
+                        a.Candidate.CvUrl,
+                        a.Candidate.ExperienceYears,
+                        Email = a.Candidate.User != null ? a.Candidate.User.Email : "Chưa có email"
+                    } : null
+                })
                 .ToListAsync();
 
             return Ok(applications);
         }
 
-        // HR cập nhật trạng thái đơn (Kéo thả ứng viên qua các cột NEW -> REVIEWING -> INTERVIEWING...)
-        [HttpPut("{id}/status")]
+        [HttpPut("{id:int}/status")]
         [Authorize(Roles = "EMPLOYER, ADMIN")]
         public async Task<IActionResult> UpdateStatus(int id, [FromBody] UpdateStatusDto dto)
         {
@@ -114,29 +158,28 @@ namespace JobHubPro.Api.Controllers
 
             if (application == null) return NotFound();
 
-            var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "0");
+            var claimId = User.FindFirst("id")?.Value ?? User.FindFirst("sub")?.Value ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var userId = !string.IsNullOrEmpty(claimId) ? int.Parse(claimId) : 0;
             var userRole = User.FindFirst(ClaimTypes.Role)?.Value;
 
-            // Bảo mật: Chỉ người tạo ra Job đó mới được quyền duyệt đơn
             if (userRole != "ADMIN")
             {
                 var company = await _context.Companies.FirstOrDefaultAsync(c => c.UserId == userId);
                 if (company == null || application.Job.CompanyId != company.Id)
-                    return Forbid("Bạn không có quyền duyệt đơn ứng tuyển này.");
+                    return Forbid();
             }
 
-            // Danh sách các trạng thái hợp lệ của ATS
             var validStatuses = new[] { "NEW", "REVIEWING", "INTERVIEWING", "OFFERED", "HIRED", "REJECTED" };
-            var requestedStatus = dto.Status.ToUpper();
+            var requestedStatus = (dto.Status ?? "").ToUpper();
 
             if (!validStatuses.Contains(requestedStatus))
-                return BadRequest($"Trạng thái không hợp lệ. Chỉ chấp nhận: {string.Join(", ", validStatuses)}");
+                return BadRequest(new { message = $"Trạng thái không hợp lệ. Chỉ chấp nhận: {string.Join(", ", validStatuses)}" });
 
             application.Status = requestedStatus;
             application.UpdatedAt = DateTime.UtcNow;
 
             await _context.SaveChangesAsync();
-            return Ok(new { message = $"Cập nhật trạng thái thành {requestedStatus} thành công!", application });
+            return Ok(new { message = $"Cập nhật trạng thái thành {requestedStatus} thành công!" });
         }
     }
 }
